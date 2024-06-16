@@ -1,1 +1,843 @@
+# TRABAJO FINAL DE MASTER
+
+# Universidad Abierta de Cataluna
+# Maestria en Ciencia de datos
+# Autor: Alexiss Mejia
+# Fecha Ultima modificación: 16/06/2024
+
+########################################
+
+# Carga de las librerias
+library(reshape)
+library(foreign)
+library(readr)
+library(mice)
+library(VIM)
+library(caret)
+library(class)
+library(laeken)
+library(psych)
+library(nortest)
+library(dplyr) 
+library(readxl)
+library(tidyr)
+library(ggplot2)
+library(dplyr)
+library(readr)
+library(patchwork)
+library(mltools)
+library(data.table)
+library(smotefamily)
+library(glmnet)
+library(caret)
+library(rpart)
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+
+if(!require("rstatix")) install.packages("rstatix"); library("rstatix")
+if(!require("ggpubr")) install.packages("ggpubr"); library("ggpubr")
+if(!require("dummy")) install.packages("dummy"); library("dummy")
+library(fastDummies)
+if(!require("smotefamily")) install.packages("smotefamily"); library("smotefamily")
+
+
+
+# Carga del conjunto original de datos provisto para el TFM
+travel_insurance <- read_csv("C:/MAESTRIA/TFM/travel insurance.csv")
+
+# Renombrar las columnas
+colnames(travel_insurance) <- c("Agency", "Agency_Type", "Distribution Channel", 
+                                "Product_Name", "Claim", "Duration", "Destination", 
+                                "Net_Sales", "Commission_(in_value)", "Gender", "Age")
+
+
+#################################################################################################################
+##################################################PREPROCESAMIENTO###############################################
+#################################################################################################################
+
+# Filtro de los registros erroneos
+travel_incompleto <- filter(travel_insurance, is.na(Agency_Type))
+
+# Filtro del original los incompletos
+travel_insurance <- filter(travel_insurance, !is.na(Agency_Type))
+
+
+# Agregar el sÃ­mbolo "\\" antes de las comillas dobles
+travel_incompleto$Agency <- gsub("\"", "\\\\\"", travel_incompleto$Agency)
+
+
+# CreaciÃ³n del patrÃ³n de bÃºsqueda
+sbt <- strsplit(travel_incompleto$Agency, ",(?=([^\"]*\"[^\"]*\")*[^\"]*$)", perl = TRUE)
+
+# Crear un dataframe con las subcadenas
+df_completar <- data.frame(matrix(unlist(sbt), nrow = 2599, byrow = TRUE))
+
+df_completar$X7 <- gsub("\\\\|\"", "", df_completar$X7)
+
+
+#Renombrar las columnas
+colnames(df_completar) <- c("Agency", "Agency_Type", "Distribution Channel", 
+                            "Product_Name", "Claim", "Duration", "Destination", 
+                            "Net_Sales", "Commission_(in_value)", "Gender", "Age")
+
+
+# unir conkjunto de datos incompleto, con el conjuto de datos depurado 
+travel_insurance_complete <- rbind(df_completar, travel_insurance)
+
+rm(list=setdiff(ls(), "travel_insurance_complete"))
+
+#################################################################################################################
+#########################################Deteccion de Atípicos###################################################
+#################################################################################################################
+
+# Transformacion de las variables numericas 
+travel_insurance_complete$Net_Sales<- as.numeric(travel_insurance_complete$Net_Sales)
+travel_insurance_complete$Age<- as.numeric(travel_insurance_complete$Age)
+travel_insurance_complete$Duration<- as.numeric(travel_insurance_complete$Duration)
+travel_insurance_complete$`Commission_(in_value)`<- as.numeric(travel_insurance_complete$`Commission_(in_value)`)
+
+
+### Deteccionn de valores perdidos
+aggr(travel_insurance_complete,numbers=T,sortVar=T)
+apply(is.na(travel_insurance_complete), 2, sum)
+
+## Se excluye la variable genero en vista de que no se puede recuerpar informacion de esta
+drop_columns = c("Gender") 
+travel_insurance_complete = travel_insurance_complete[, !(names(travel_insurance_complete) %in% drop_columns)]
+
+
+# Se extrae las variables numericas para poder realizar los plots mas facilmente
+ventas<-travel_insurance_complete$Net_Sales
+edad<-travel_insurance_complete$Age
+Duration<- travel_insurance_complete$Duration
+Commision<-travel_insurance_complete$`Commission_(in_value)`
+
+
+# Se grealiza las graficas de caja y bigotes 
+
+# Para ventas
+graf_ventas<-ggplot(data.frame(x=ventas), aes(x = "", y = x)) +
+  stat_boxplot(geom = "errorbar",      # Bigotes
+               width = 0.2) +
+  geom_boxplot(fill = "#4271AE",       # Color de la caja
+               outlier.colour = "red", # Color de los valores atÃ­picos
+               alpha = 0.9) +          # Transparencia del color de la caja
+  ggtitle("Boxplot de ventas") + # TÃ­tulo del plot
+  ylab("Ventas Netas")+
+  xlab("") +   # Etiqueta del eje x
+  coord_flip() # Boxplot horizontal
+  
+# Para vedad
+graf_edad<-ggplot(data.frame(x=edad), aes(x = "", y = x)) +
+  stat_boxplot(geom = "errorbar",      # Bigotes
+               width = 0.2) +
+  geom_boxplot(fill = "#4271AE",       # Color de la caja
+               outlier.colour = "red", # Color de los valores atÃ­picos
+               alpha = 0.9) +          # Transparencia del color de la caja
+  ggtitle("Boxplot de edad") + # TÃ­tulo del plot
+  ylab("Edad") +   # Etiqueta del eje x
+  xlab("")+
+  coord_flip() # Boxplot horizontal
+
+
+# Para la duracciÃ³n del  viaje
+graf_duracion<-ggplot(data.frame(x=Duration), aes(x = "", y = x)) +
+  stat_boxplot(geom = "errorbar",      # Bigotes
+               width = 0.2) +
+  geom_boxplot(fill = "#4271AE",       # Color de la caja
+               outlier.colour = "red", # Color de los valores atÃ­picos
+               alpha = 0.9) +          # Transparencia del color de la caja
+  ggtitle("Boxplot de Duration") + # TÃ­tulo del plot
+  ylab("Duracion")+
+  xlab("") +   # Etiqueta del eje x
+  coord_flip() # Boxplot horizontal
+
+# Para el caso de la comision
+graf_comision<-ggplot(data.frame(x=Commision), aes(x = "", y = x)) +
+  stat_boxplot(geom = "errorbar",      # Bigotes
+               width = 0.2) +
+  geom_boxplot(fill = "#4271AE",       # Color de la caja
+               outlier.colour = "red", # Color de los valores atÃ­picos
+               alpha = 0.9) +          # Transparencia del color de la caja
+  ggtitle("Boxplot de Commision") + # TÃ­tulo del plot
+  ylab("Commision") +   # Etiqueta del eje x
+  xlab("")+
+  coord_flip() # Boxplot horizontal
+
+
+# Se llama a todos los graficos
+graf_ventas + graf_edad+graf_duracion+graf_comision
+
+
+## Exclusion de casos y mas depuraciones
+# duracion (se excluye viajes con duraciÃ³n menores a 0 y superiores a 4000)
+travel_insurance_complete = travel_insurance_complete[!(travel_insurance_complete$Duration <= 0 | 
+                                                          travel_insurance_complete$Duration > 4000),]
+
+#edad ( se coloca la  segunda edad maxima a los casos  que tienen 118 aÃ±os)
+travel_insurance_complete = travel_insurance_complete[!(travel_insurance_complete$Age <= 0),]
+travel_insurance_complete$Age[travel_insurance_complete$Age == 118] <- 88
+
+# Comisiones (se pone cero a las ventas negativas)
+travel_insurance_complete$Net_Sales[travel_insurance_complete$Net_Sales < 0] <- 0
+
+
+### numero de  casos
+n_Agency = length(unique(travel_insurance_complete$Agency)) 
+n_Agency
+n_Agency_type = length(unique(travel_insurance_complete$Agency)) 
+n_Agency_type
+n_Destination = length(unique(travel_insurance_complete$Destination)) 
+n_Destination
+n_Distribution_type = length(unique(travel_insurance_complete$`Distribution Channel`)) 
+n_Distribution_type
+n_Product_name = length(unique(travel_insurance_complete$Product_Name)) 
+n_Product_name
+
+
+# seccion de depuraciÃ³n de  destino
+df_Destination_freq = travel_insurance_complete %>% 
+  group_by(Destination) %>%
+  summarise(no_rows = length(Destination))
+
+
+df_Destination_freq = df_Destination_freq  %>% 
+  arrange(desc(no_rows)) ## ordenamiento
+
+##seleccion del top 10
+top_10_Destination = df_Destination_freq[1:10,1] 
+top_10_Destination = as.character(unlist(top_10_Destination))
+
+all_Destination = as.character(unique(unlist(travel_insurance_complete["Destination"])))
+length(all_Destination)
+
+##filtro del top
+none_top_Destination = all_Destination[!all_Destination %in% top_10_Destination] 
+length(none_top_Destination)
+
+
+travel_insurance_complete$Destination = as.character(travel_insurance_complete$Destination)
+travel_insurance_complete$Destination = ifelse(travel_insurance_complete$Destination %in% none_top_Destination, "Otros", travel_insurance_complete$Destination)
+travel_insurance_complete$Destination = as.factor(travel_insurance_complete$Destination)
+
+# seccion de depuraciÃ³n del nombre del producto
+df_Product_freq = travel_insurance_complete %>% 
+  group_by(Product_Name) %>%
+  summarise(no_rows = length(Product_Name))
+
+## descending order
+df_Product_freq = df_Product_freq  %>% 
+  arrange(desc(no_rows)) 
+
+##seleccion del top 10
+top_5_Product = df_Product_freq[1:10,1] 
+top_5_Product = as.character(unlist(top_5_Product))
+length(top_5_Product)
+
+all_Prouct = as.character(unique(unlist(travel_insurance_complete["Product_Name"])))
+length(all_Prouct)
+
+##filtro  del top de destination
+none_top_Prouct = all_Prouct[!all_Prouct %in% top_5_Product] ##filter the top destination
+length(none_top_Prouct)
+
+travel_insurance_complete$Product_Name = as.character(travel_insurance_complete$Product_Name)
+travel_insurance_complete$Product_Name = ifelse(travel_insurance_complete$Product_Name %in% none_top_Prouct, 
+                                                "Others", travel_insurance_complete$Product_Name)
+travel_insurance_complete$Product_Name = as.factor(travel_insurance_complete$Product_Name)
+
+
+# GrÃ¡fico de la edad  y su densidad
+
+Conf3x2 = matrix(c(1:3), nrow=2, byrow=TRUE)
+#Conf3x2
+layout(Conf3x2)
+
+hist(x =  travel_insurance_complete$Age, main="Histrograma de edad", xlab = "edad", ylab = "Frecuencia", labels = T)
+grid(nx = NA, ny = NULL, lty = 2, col = "gray", lwd = 1)
+
+hist(edad, prob = TRUE,
+     main = "Densidad de edad", ylab = "Densidad")
+x <- seq(min(edad), max(edad), length = 40)
+f <- dnorm(x, mean = mean(edad), sd = sd(edad))
+lines(x, f, col = "red", lwd = 2)
+
+
+ggplot(data = travel_insurance_complete, aes(x = Age)) +
+  geom_histogram(binwidth = 2, color = 4, fill = "white") +
+  stat_bin(
+    binwidth = 1,
+    geom = "text",
+    color = "black",
+    size = 1.5,
+    aes(label = ..count.., group = Age),
+    position = position_stack(vjust = 0.5)
+  )
+
+
+#################################################################################################################
+#########################################Estadisticas_Descriptivas###############################################
+#################################################################################################################
+
+
+# Generacionn de tablas de la proporcion de las tablas de frecuencias
+counts_claim <- table(travel_insurance_complete$Claim)
+counts_Agency_Type <- table(travel_insurance_complete$Agency_Type)
+
+counts_destino <- table(travel_insurance_complete$Destination)
+counts_destino_prop<- sort(prop.table(counts_destino), decreasing = TRUE)
+
+counts_nombre_producto <- table(travel_insurance_complete$Product_Name)
+counts_nombre_producto_prop <- sort(prop.table(counts_nombre_producto), decreasing = TRUE)
+
+
+# graficos de los proporciones
+
+par(mfcol=c(2,2))
+
+barplot(prop.table(counts_claim),
+        col=c("darkblue","brown"), 
+        main="Estado de los reclamos", 
+        legend.texto=c("Si","No"),
+        xlab ="Reclamos", 
+        ylab = "Porcentaje",
+        ylim=c(0,1.2) )
+
+barplot(prop.table(counts_Agency_Type),
+        col=c("grey","brown"), main="Tipo de agencias", 
+        legend.texto=c("Airlines","Travel Agency"),
+        xlab ="Agencias", 
+        ylab = "Porcentaje",
+        ylim=c(0,0.60) )
+
+barplot(counts_destino_prop,
+        main = "Proporciones de destino",
+        xlab = "Destino",
+        ylab = "Porcentaje",
+        ylim = c(0, 0.25),
+        col = rainbow(length(prop.table(counts_destino_prop))))
+
+barplot(counts_nombre_producto_prop,
+        main = "ProporciÃ³n de productos de seguros",
+        xlab = "Productos",
+        ylab = "Porcentaje",
+        ylim = c(0, 0.65),
+        col = rainbow(length(prop.table(counts_nombre_producto_prop))))
+
+
+###### grafico de target vs cuatitativas
+
+par(mfcol=c(2,2))
+
+boxplot(travel_insurance_complete$Age ~ travel_insurance_complete$Claim ,
+        main = "Reclamo segÃºn la edad",
+        ylab = "Edad",
+        xlab="Reclamo",
+        #names = c("Female","Male"),
+        #horizontal = F,
+        col = rainbow(2)
+)
+
+
+boxplot(travel_insurance_complete$Duration ~ travel_insurance_complete$Claim ,
+        main = "Reclamo segÃºn la duraciÃ³n del viaje",
+        ylab = "DuraciÃ³n",
+        xlab="Reclamo",
+        #names = c("Female","Male"),
+        #horizontal = F,
+        col = rainbow(2)
+)
+
+boxplot(travel_insurance_complete$Net_Sales ~ travel_insurance_complete$Claim ,
+        main = "Reclamo segÃºn las ventas netas",
+        ylab = "Ventas netas",
+        xlab="Reclamo",
+        #names = c("Female","Male"),
+        #horizontal = F,
+        col = rainbow(2)
+)
+
+boxplot(travel_insurance_complete$`Commission_(in_value)` ~ travel_insurance_complete$Claim ,
+        main = "Reclamo segÃºn la comision",
+        ylab = "Comision",
+        xlab="Reclamo",
+        #names = c("Female","Male"),
+        #horizontal = F,
+        col = rainbow(2)
+)
+
+###### grafico de target vs cualitativas
+
+g_1<- travel_insurance_complete %>%
+      ggplot(aes(x=Claim , fill = Agency_Type)) +
+      geom_bar()
+
+g_2<- travel_insurance_complete %>%
+      ggplot(aes(x=Claim, fill = `Distribution Channel`)) +
+      geom_bar()
+
+g_3<- travel_insurance_complete %>%
+      ggplot(aes(x=Product_Name , fill = Claim)) +
+      geom_bar()+
+      labs(x = "Producto") +
+      labs(y = "") +
+      coord_flip()
+
+g_4<- travel_insurance_complete%>%
+  ggplot(aes(x = Destination, fill = Claim)) +
+  geom_bar() +
+  labs(x = "Destino") +
+  labs(y = "") +
+  coord_flip()
+
+
+# Se llama los graficos antes generados
+g_1 + g_2+g_3+g_4
+
+
+### Analisis de correlaciones
+
+n = c("Claim","Agency","Agency_Type","Distribution Channel", "Product_Name","Duration","Destination", 
+      "Net_Sales","Age","Commission_(in_value)")
+
+fusion_per_accident_aux = travel_insurance_complete %>% select(all_of(n))
+
+
+###########################################################################################################################
+############################################ Generacion de variables dummies##############################################
+#####################################################one-hot encoding######################################################
+###########################################################################################################################
+
+# Se indifica a las variables sobre las que se aplicará  el one-hot encoding
+results <- fastDummies::dummy_cols(fusion_per_accident_aux)
+results <- select(results, -c("Agency","Agency_Type","Distribution Channel","Product_Name","Destination"))
+
+# Se transforma a factor la variable target
+results$Claim = as.factor(results$Claim) 
+levels(results$Claim) <- c(0,1)
+
+# Se selecciona las variables 
+n2 = c("Claim","Duration", 
+      "Net_Sales","Age","Commission_(in_value)","Destination_SINGAPORE","Destination_PHILIPPINES","Destination_MALAYSIA",
+      "Agency_JZI","Agency_JWT","Agency_CWT","Agency_EPX","Agency_C2B","Product_Name_Cancellation Plan",
+      "Product_Name_2 way Comprehensive Plan")
+
+results= results %>% select(all_of(n2))
+results$Claim<- as.numeric(results$Claim)
+
+# Se definen los parametros para generar la matriz de correlaciones
+columns2 <- c("")
+corr <- results[ , !(names(results) %in% columns2)]
+my_palette <- get_palette(c("blue", "white", "red"), 200)
+
+
+### Correlacion por Spearman
+matriz_correlacion<-cor_mat(corr, method="spearman") 
+cor_plot(matriz_correlacion, method = "number", palette = my_palette, tl.cex = 0.45)
+
+
+##############################################################################################################################
+############################# verificacion de las variables mas importantes (Lasso)###########################################
+##############################################################################################################################
+
+# se crea otro dataframe para poder tener mejor control y conservar el orignal
+travel_insurance_complete_c<-travel_insurance_complete
+
+travel_insurance_complete$Claim = as.factor(travel_insurance_complete$Claim) 
+levels(travel_insurance_complete$Claim) <- c(0,1)
+
+# se ejecuta un proceso one-hot de discretizacion
+x=model.matrix(Claim~.,travel_insurance_complete)[,-1]
+y=travel_insurance_complete$Claim
+
+
+###cross validation  de lasso
+cv_lasso=cv.glmnet(x,y,alpha=1,family="binomial")
+
+
+### Mejores variables
+lasso_coef = coef(cv_lasso, s = "lambda.min")
+
+###Seleccion de un top 15
+order_data = abs(as.data.frame(as.matrix(lasso_coef)))
+order_data$column = row.names(order_data)
+row.names(order_data) <- NULL
+order_data <- order_data[-1,]
+selected_variable = order_data[order(-order_data[1]),][1:15,]
+
+###Lista de las variables 
+variable_name = selected_variable["column"][1:15,1]
+names(order_data) <- c("Coeficiente_lasso", "Nombre_variables")
+
+
+##############################################################################################################################
+############################# Verificación variables mas importantes (algoritmo BORUTA)########################################
+##############################################################################################################################
+
+install.packages("Boruta")
+library(Boruta)
+
+## one-hot categorizar
+travel_insurance_one_hot<-travel_insurance_complete_c
+
+## Dummies unicamente a ciertas variables
+mi_df_dummy <- dummy_cols(travel_insurance_one_hot,
+                          select_columns = c("Destination", "Agency", "Distribution Channel","Agency_Type","Product_Name"),
+                          remove_first_dummy = FALSE,
+                          remove_selected_columns = FALSE)
+
+
+# Convertir a factor la variable claim
+mi_df_boruta <- subset(mi_df_dummy, select = -c(Agency, Agency_Type,Destination,`Distribution Channel`, Product_Name))
+mi_df_boruta$Claim = as.factor(mi_df_boruta$Claim) 
+levels(mi_df_boruta$Claim) <- c(0,1)
+
+## Para poder tener atribtuos mejor comparables se  normalización de las variagles 
+##   age, duration, net_sales y Commission_(in_value)
+
+#Estandarización Z (puntuación Z):
+mi_df_boruta$Age <- (mi_df_boruta$Age - mean(mi_df_boruta$Age)) / sd(mi_df_boruta$Age)
+mi_df_boruta$Duration<- (mi_df_boruta$Duration - mean(mi_df_boruta$Duration)) / sd(mi_df_boruta$Duration)
+mi_df_boruta$Net_Sales<- (mi_df_boruta$Net_Sales - mean(mi_df_boruta$Net_Sales)) / sd(mi_df_boruta$Net_Sales)
+mi_df_boruta$`Commission_(in_value)`<- (mi_df_boruta$`Commission_(in_value)` - mean(mi_df_boruta$`Commission_(in_value)`)) / sd(mi_df_boruta$`Commission_(in_value)`)
+
+
+## Se aplica el algorimto BORUTA para determinar las variables mas relevantes
+boruta_result <- Boruta(Claim ~ ., data = mi_df_boruta)
+print(boruta_result)
+
+# Se muestra el grafico de Boruta
+plot(boruta_result)
+
+# Se miuestra el nombre de las variables significativa
+boruta_significativas <- names(boruta_result$finalDecision[boruta_result$finalDecision %in% "Confirmed"])  
+print(boruta_significativas) 
+
+#################################################################################################################
+########################################################RESAMPLING###############################################
+#################################################################################################################
+
+## oversampling
+
+# Sobre los atributos importantes se hace el resampling y se ejecutan los modelos
+n3 = c("Claim","Agency_TST","Agency_RAB","Agency_EPX","Agency_ART","Agency_CWT", "Agency_ADM","Agency_JZI",
+       "Product_Name_Others","Distribution Channel_Offline","Distribution Channel_Online","Product_Name_Basic Plan",
+      "Product_Name_Annual Silver Plan","Product_Name_Bronze Plan","Product_Name_Others","Product_Name_Rental Vehicle Excess Insurance", 
+    "Product_Name_Value Plan", "Duration","Net_Sales","Commission_(in_value)","Age")
+
+
+# Se crea otro df con las variables importantes
+df1= mi_df_dummy %>% select(all_of(n3))
+
+# Se realiza un proceso de normalización a las variables que no se les aplico una transformación (Age, Duration,Net_Sales, comision)
+
+df1$Age <- (df1$Age - mean(df1$Age)) / sd(df1$Age)
+df1$Duration<- (df1$Duration - mean(df1$Duration)) / sd(df1$Duration)
+df1$Net_Sales<- (df1$Net_Sales - mean(df1$Net_Sales)) / sd(df1$Net_Sales)
+df1$`Commission_(in_value)`<- (df1$`Commission_(in_value)` - mean(df1$`Commission_(in_value)`))
+
+# Se convierte a factor la variable Claim
+df1$Claim = as.factor(df1$Claim) 
+levels(df1$Claim) <- c(0,1)
+
+## se genera el resampling mediante BLSMOTE y un metodo type2
+df1$Claim <- as.numeric(df1$Claim)
+travel_insurance_over <- BLSMOTE(df1, target = df1$Claim, K = 2, C = 2, method = "type2")
+
+# se obtiene el dataset final
+travel_insurance_final<-travel_insurance_over$data
+
+# Se genera un dataset final de 94032 registros producto del resampling
+# El metodo type2 genera datos adicionales como vacios, estos se los elimina
+travel_insurance_final <- travel_insurance_final[!is.na(travel_insurance_final$Claim),]
+counts_destino_pro_vf<- prop.table(table(travel_insurance_final$Claim))
+counts_destino_pro_vf
+
+## Se borra los  demas archivos y unicamente nos quedamos con el dataset fnal y depurado
+# Se guarda el dataset final (parte de los objetivos)
+rm(list=setdiff(ls(), "travel_insurance_final"))
+
+save(travel_insurance_final, file = "C:/MAESTRIA/TFM/TFM_Plantilla_2024/TFM_Plantilla 2/TFM_Plantilla_Latex_es/travel_insurance_final_1.RData")
+
+
+
+#################################################################################################################
+########################################################MODELADO#################################################
+#################################################################################################################
+
+
+#################################################################################################################
+################################################# MODELO LOGISTICO###############################################
+#################################################################################################################
+
+# Se carga el dataset final depurado
+load("C:/MAESTRIA/TFM/TFM_Plantilla_2024/TFM_Plantilla 2/TFM_Plantilla_Latex_es/travel_insurance_final_1.RData")
+
+# Se convierte a factores la variable dependiente
+travel_insurance_final$Claim<- as.factor(travel_insurance_final$Claim)
+travel_insurance_final$Claim <- ifelse(travel_insurance_final$Claim == "1", 0, 1)
+levels(travel_insurance_final$Claim) <- c("1", "0") 
+
+
+travel_insurance_final$Age <- (travel_insurance_final$Age - mean(travel_insurance_final$Age)) / sd(travel_insurance_final$Age)
+travel_insurance_final$Duration<- (travel_insurance_final$Duration - mean(travel_insurance_final$Duration)) / sd(travel_insurance_final$Duration)
+travel_insurance_final$Net_Sales<- (travel_insurance_final$Net_Sales - mean(travel_insurance_final$Net_Sales)) / sd(travel_insurance_final$Net_Sales)
+travel_insurance_final$`Commission_(in_value)`<- (travel_insurance_final$`Commission_(in_value)` - mean(travel_insurance_final$`Commission_(in_value)`))
+
+# Se pone una semilla para poder replicar los resultados
+set.seed(123)
+
+# Se genera el conjunto de entrenamiento y de test 
+train_ind <- sample(1:nrow(travel_insurance_final), size = 0.67 * nrow(travel_insurance_final))
+test_ind <- setdiff(1:nrow(travel_insurance_final), train_ind)
+train <- travel_insurance_final[train_ind, ]
+test <- travel_insurance_final[test_ind, ]
+
+
+
+#################################################################################################################
+##############################################AJUSTES HIPERPARAMETROS############################################
+#################################################################################################################
+
+library(glmnet)
+library(caret)
+
+# Cargar tus datos (reemplaza "train" con tu conjunto de datos)
+train<- select(train, -c("class"))
+datos <- train
+
+
+# Crear una cuadrícula de valores para los hiperparámetros
+hyperparams <- expand.grid(
+  alpha = seq(0, 1, by = 0.1),  # Valores de alpha (mezcla de L1 y L2)
+  lambda = seq(0.01, 2, by = 0.1)  # Valores de lambda (intensidad de la regularización)
+)
+
+# Se realiza  la búsqueda de los mejores hiperparámetros y se usa la cuadrícula con validación cruzada
+model <- train(
+  Claim ~ Agency_TST + Agency_RAB + Agency_EPX + Agency_ART+ Agency_CWT+ Agency_ADM+ Agency_JZI+Product_Name_Others +
+    `Distribution Channel_Online`+  `Distribution Channel_Offline` + `Product_Name_Basic Plan`+ `Product_Name_Annual Silver Plan` +
+    `Product_Name_Bronze Plan`+ `Product_Name_Rental Vehicle Excess Insurance`+`Product_Name_Value Plan`+Age + Duration + Net_Sales + `Commission_(in_value)`,
+  data = datos,
+  method = "glmnet",
+  trControl = trainControl(method = "cv", number = 5),
+  tuneGrid = hyperparams
+)
+
+
+# Ver los mejores hiperparámetros
+best_alpha <- model$bestTune$alpha
+best_lambda <- model$bestTune$lambda
+
+
+# Obtener los coeficientes para el valor óptimo de lambda
+coeficientes_optimos <- coef(model$finalModel, s = best_lambda)
+
+# Extraer la matriz de características (x) y la variable objetivo (y)
+x <- model$trainingData[, -which(names(model$trainingData) == ".outcome")]
+y <- model$trainingData$.outcome
+
+# Ajustar el modelo final con los mejores hiperparámetros
+final_model <- glmnet(x, y, alpha = best_alpha, lambda = best_lambda)
+
+# Se evalua el rendimiento del modelo
+
+test2 <-select(test, -c("class","Claim"))
+test2<-data.matrix(test2)
+
+# Es necesario considerar que y_test toma a la variable claim para compararla
+y_test <- test$Claim
+
+# Se convierte a factor 
+y_test <- as.factor(y_test)
+
+## Se genera las respectivas predicciones
+probabilidades  <- predict(final_model, newx = test2, type = "response")
+y_pred <- ifelse(probabilidades >= 0.01, 1, 0)
+y_pred<- as.factor(y_pred)
+
+## Matriz de confucion de caret
+confusionMatrix(y_pred, y_test)
+
+#################################################################################################################
+############################################################ARBOL################################################
+#################################################################################################################
+
+# Se carga nuevamente el dataset depurado
+load("C:/MAESTRIA/TFM/TFM_Plantilla_2024/TFM_Plantilla 2/TFM_Plantilla_Latex_es/travel_insurance_final_1.RData")
+
+# Se convierte a factores la variable dependiente
+travel_insurance_final$Claim<- as.factor(travel_insurance_final$Claim)
+travel_insurance_final$Claim <- ifelse(travel_insurance_final$Claim == "1", 0, 1)
+levels(travel_insurance_final$Claim) <- c("1", "0") 
+
+# Se coloca la semilla
+set.seed(123)
+
+# Se genera el conjunto de entrenamiento y de test 
+train_ind <- sample(1:nrow(travel_insurance_final), size = 0.67 * nrow(travel_insurance_final))
+test_ind <- setdiff(1:nrow(travel_insurance_final), train_ind)
+
+train <- travel_insurance_final[train_ind, ]
+test <- travel_insurance_final[test_ind, ]
+
+# Se convierte a factor la variable target
+train$Claim<- as.factor(train$Claim)
+test$Claim<- as.factor(test$Claim)
+y_test <- test$Claim
+
+########################################hiperparámetros
+## en caso del  arbol se puede ajustar Los hiperparámetros comunes en rpart incluyen cp (complexity parameter), 
+### minsplit (mínimo de observaciones para dividir un nodo), maxdepth (profundidad máxima del árbol), entre otros.
+
+## Se ejecuta el modelo y se hace una pequeÃ±a poda  se usan  las variables
+## Destination_MALAYSIA + Agency_LWC+ Destination_PHILIPPINES+ Destination_CHINA+Agency_EPX+`Product_Name_2 way Comprehensive Plan`+`
+## Product_Name_Cancellation Plan` y  Agency_C2B debido a que con estas se presentan mejores valores en las metricas
+
+#control.poda <- rpart.control(maxdepth = 15)
+
+seguros.model <- rpart(Claim ~ Agency_TST + Agency_RAB + Agency_EPX + Agency_ART+ Agency_CWT+ Agency_ADM+ Agency_JZI+Product_Name_Others +
+                         `Distribution Channel_Online`+  `Distribution Channel_Offline` + `Product_Name_Basic Plan`+ `Product_Name_Annual Silver Plan` +
+                         `Product_Name_Bronze Plan`+ `Product_Name_Rental Vehicle Excess Insurance`+`Product_Name_Value Plan`+Age + Duration + Net_Sales + `Commission_(in_value)`,
+                       data = train,
+                       method = "class",
+                       control = rpart.control(minsplit = 5, maxdepth = 15))
+
+
+
+# Se grafica el arbol
+rpart.plot(seguros.model,clip.right.labs = TRUE,branch = 1, extra = 104)
+
+
+## Prediccion
+y_pred_arbol <- predict(seguros.model, newdata = test, type = "class")
+
+## Matriz de confucion de caret
+confusionMatrix(y_pred_arbol, y_test)
+
+#################################################################################################################
+##################################################################### MODELO SVM ################################
+#################################################################################################################
+
+load("C:/MAESTRIA/TFM/TFM_Plantilla_2024/TFM_Plantilla 2/TFM_Plantilla_Latex_es/travel_insurance_final_1.RData")
+
+# Se convierte a factores la variable dependiente
+travel_insurance_final$Claim<- as.factor(travel_insurance_final$Claim)
+travel_insurance_final$Claim <- ifelse(travel_insurance_final$Claim == "1", 0, 1)
+levels(travel_insurance_final$Claim) <- c("1", "0") 
+
+# Se coloca la semilla 
+set.seed(123)
+
+# Se genera el conjunto de entrenamiento y de test 
+train_ind <- sample(1:nrow(travel_insurance_final), size = 0.67 * nrow(travel_insurance_final))
+test_ind <- setdiff(1:nrow(travel_insurance_final), train_ind)
+
+train <- travel_insurance_final[train_ind, ]
+test <- travel_insurance_final[test_ind, ]
+
+# Se convierte a factor la variable Claim
+train$Claim<- as.factor(train$Claim)
+test$Claim<- as.factor(test$Claim)
+y_test <- test$Claim
+
+
+# Para ejecutar el modelo SVM se usa el paquete e1071
+if(!require("e1071")) install.packages("e1071"); library("e1071")
+
+
+## Optimización de hiperparámetros
+svmTune <- tune.svm(Claim ~ Agency_TST + Agency_RAB + Agency_EPX + Agency_ART+ Agency_CWT+ Agency_ADM+ Agency_JZI+Product_Name_Others +
+                      `Distribution Channel_Online`+  `Distribution Channel_Offline` + `Product_Name_Basic Plan`+ `Product_Name_Annual Silver Plan` +
+                      `Product_Name_Bronze Plan`+ `Product_Name_Rental Vehicle Excess Insurance`+`Product_Name_Value Plan`+Age + Duration + Net_Sales + `Commission_(in_value)`, 
+                    data = train, gamma=10^(-6:-1), cost=10^(1:4), kfold=2)
+
+# Muestra los mejores parámetros
+print(svmTune$best.parameters)
+
+
+# Con los mejores hiperparámetros se entrena el modelo
+
+svmfit <- svm(Claim ~ Agency_TST + Agency_RAB + Agency_EPX + Agency_ART+ Agency_CWT+ Agency_ADM+ Agency_JZI+Product_Name_Others +
+                `Distribution Channel_Online`+  `Distribution Channel_Offline` + `Product_Name_Basic Plan`+ `Product_Name_Annual Silver Plan` +
+                `Product_Name_Bronze Plan`+ `Product_Name_Rental Vehicle Excess Insurance`+`Product_Name_Value Plan`+Age + Duration + Net_Sales + `Commission_(in_value)`, 
+              data = train, kernel = "radial", cost = 10, scale = FALSE)
+
+
+
+## Prediccion
+y_pred_svm <- predict(svmfit, newdata = test)
+#y_pred_svm <- ifelse(y_pred_svm >= 0.01, 1, 0)
+
+## Matriz de confucion de caret
+confusionMatrix(y_pred_svm, y_test)
+
+
+#################################################################################################################
+###################################################### Gradient Boosting ########################################
+#################################################################################################################
+
+# Es necesario instalar el paquete xgboost
+install.packages("xgboost")
+library(xgboost)
+
+# Se carga el conjunto de datos depurado
+load("C:/MAESTRIA/TFM/TFM_Plantilla_2024/TFM_Plantilla 2/TFM_Plantilla_Latex_es/travel_insurance_final_1.RData")
+
+# Se convierte a factores la variable dependiente
+travel_insurance_final$Claim<- as.factor(travel_insurance_final$Claim)
+travel_insurance_final$Claim <- ifelse(travel_insurance_final$Claim == "1", 0, 1)
+levels(travel_insurance_final$Claim) <- c("1", "0") 
+
+
+# Se coloca la semilla 
+set.seed(123)
+
+# Se genera el conjunto de entrenamiento y de test 
+train_ind <- sample(1:nrow(travel_insurance_final), size = 0.67 * nrow(travel_insurance_final))
+test_ind <- setdiff(1:nrow(travel_insurance_final), train_ind)
+
+train <- travel_insurance_final[train_ind, ]
+test <- travel_insurance_final[test_ind, ]
+
+
+train$Claim<- as.factor(train$Claim)
+test$Claim<- as.factor(test$Claim)
+y_test <- test$Claim
+
+
+y <- train$Claim
+X <- train %>% select(-c("Claim","class")) 
+
+# Convierte las etiquetas a valores numéricos
+y <- as.numeric(as.character(y))
+
+dtrain <- xgb.DMatrix(data = as.matrix(X), label = y)
+
+
+# Con los mejores Hiperparámetros se genera el modelo
+params <- list(
+  objective = "binary:logistic",  # Para regresión
+  max_depth = 3,
+  eta = 0.1,
+  nrounds = 200
+)
+
+# Modelo usando  xgb.train
+model_xgboost <- xgb.train(params = params, data = dtrain, nrounds = params$nrounds)
+
+## Prediccion
+
+test <- test %>% select(-c("Claim","class")) 
+
+dtest <- xgb.DMatrix(data = as.matrix(test))
+y_pred_xgboost <- predict(model_xgboost, newdata = dtest)
+y_pred_xgboost <- ifelse(y_pred_xgboost >= 0.5, 1, 0)
+
+y_pred_xgboost = as.factor(y_pred_xgboost) 
+levels(y_pred_xgboost) <- c(0,1)
+
+## Matriz de confucion de caret
+confusionMatrix(y_pred_xgboost, y_test)
 
