@@ -4,4 +4,4 @@ En Repositorio se detalla el código, conjunto de datos, y demás detalles del T
 
 # Contenido del Repositorio
 - Una carpeta "source", donde se podrá encontrar el código en R Studio.
-- Una carpeta "dataset" que cotiene el dataset con las depuraciones realizadas.
+- Una carpeta "travel_insurance_final_1" que contiene el dataset con las depuraciones realizadas.
